@@ -1,0 +1,243 @@
+// Prisma schema for ILA — Inventory & Logistics Automation
+// Status/role/type fields use String (not enum) so the schema works on both
+// SQLite (dev) and PostgreSQL (prod). Allowed values live in src/constants.ts
+// and are validated with zod at the API layer.
+//
+// Multi-tenant: every tenant-owned row carries a companyId. Queries MUST scope
+// by the logged-in user's companyId for isolation. (Round 1: companyId optional
+// so existing rows can be backfilled before it's made required.)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // For production: change to "postgresql" and set DATABASE_URL accordingly.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenant
+// ---------------------------------------------------------------------------
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  warehouses     Warehouse[]
+  products       Product[]
+  suppliers      Supplier[]
+  purchaseOrders PurchaseOrder[]
+  shipments      Shipment[]
+}
+
+// ---------------------------------------------------------------------------
+// Users & auth
+// ---------------------------------------------------------------------------
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("STAFF") // ADMIN | MANAGER | STAFF
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
+  shipments      Shipment[]
+}
+
+// ---------------------------------------------------------------------------
+// Locations
+// ---------------------------------------------------------------------------
+model Warehouse {
+  id        String   @id @default(cuid())
+  code      String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  stockLevels    StockLevel[]
+  stockMovements StockMovement[]
+  shipments      Shipment[]
+
+  @@unique([companyId, code])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+model Product {
+  id           String   @id @default(cuid())
+  sku          String
+  name         String
+  description  String?
+  category     String?
+  unit         String   @default("each") // each, kg, box, etc.
+  barcode      String?
+  unitCost     Float    @default(0) // purchase cost
+  unitPrice    Float    @default(0) // sale price
+  reorderPoint Int      @default(0) // alert at/below this total quantity
+  reorderQty   Int      @default(0) // suggested reorder quantity
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  stockLevels        StockLevel[]
+  stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  shipmentItems      ShipmentItem[]
+
+  @@unique([companyId, sku])
+}
+
+// ---------------------------------------------------------------------------
+// Stock: current levels (per product+warehouse) and an immutable movement log
+// (Scoped to a company via their product/warehouse relations.)
+// ---------------------------------------------------------------------------
+model StockLevel {
+  id          String   @id @default(cuid())
+  productId   String
+  warehouseId String
+  quantity    Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+}
+
+model StockMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  warehouseId String
+  type        String // ADJUSTMENT | RECEIPT | SHIPMENT | TRANSFER_IN | TRANSFER_OUT
+  quantity    Int // signed delta: positive = in, negative = out
+  reason      String?
+  reference   String? // e.g. PO or shipment number
+  userId      String?
+  createdAt   DateTime @default(now())
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id])
+
+  @@index([productId])
+  @@index([warehouseId])
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers & purchase orders (inbound)
+// ---------------------------------------------------------------------------
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id          String    @id @default(cuid())
+  number      String
+  supplierId  String
+  warehouseId String? // destination warehouse for received goods
+  status      String    @default("DRAFT") // DRAFT | AWAITING_CONFIRMATION | ORDERED | PARTIALLY_RECEIVED | RECEIVED | CANCELLED | DECLINED
+  notes       String?
+  orderedAt   DateTime?
+  expectedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy User?               @relation(fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@unique([companyId, number])
+}
+
+model PurchaseOrderItem {
+  id              String @id @default(cuid())
+  purchaseOrderId String
+  productId       String
+  quantity        Int
+  unitCost        Float  @default(0)
+  receivedQty     Int    @default(0)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Shipments (outbound)
+// ---------------------------------------------------------------------------
+model Shipment {
+  id             String    @id @default(cuid())
+  number         String
+  warehouseId    String // source warehouse
+  status         String    @default("PENDING") // PENDING | PICKING | SHIPPED | DELIVERED | CANCELLED
+  customerName   String
+  address        String?
+  carrier        String?
+  trackingNumber String?
+  notes          String?
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  createdBy User?          @relation(fields: [createdById], references: [id])
+  items     ShipmentItem[]
+
+  @@unique([companyId, number])
+}
+
+model ShipmentItem {
+  id         String @id @default(cuid())
+  shipmentId String
+  productId  String
+  quantity   Int
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+}

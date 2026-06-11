@@ -1,0 +1,21 @@
+{
+  "name": "ila",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Inventory & Logistics Automation",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w @ila/api",
+    "dev:web": "npm run dev -w @ila/web",
+    "build": "npm run build -w @ila/api && npm run build -w @ila/web",
+    "db:migrate": "npm run db:migrate -w @ila/api",
+    "db:seed": "npm run db:seed -w @ila/api",
+    "db:studio": "npm run db:studio -w @ila/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
