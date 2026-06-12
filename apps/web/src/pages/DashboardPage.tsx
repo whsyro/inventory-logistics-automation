@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { AlertTriangle, History } from 'lucide-react';
 import { api } from '../lib/api';
 import type { DashboardData } from '../types';
 import { Badge, Card, PageHeader } from '../components/ui';
@@ -42,7 +43,9 @@ export function DashboardPage() {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Low stock */}
         <Card className="p-5">
-          <h2 className="mb-3 font-semibold text-slate-900">⚠️ Needs reordering</h2>
+          <h2 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+            <AlertTriangle size={18} className="text-amber-500" /> Needs reordering
+          </h2>
           {data.lowStock.length === 0 ? (
             <p className="text-sm text-slate-500">Everything is above its reorder point. 🎉</p>
           ) : (
@@ -65,7 +68,9 @@ export function DashboardPage() {
 
         {/* Recent movements */}
         <Card className="p-5">
-          <h2 className="mb-3 font-semibold text-slate-900">🕒 Recent stock movements</h2>
+          <h2 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+            <History size={18} className="text-slate-400" /> Recent stock movements
+          </h2>
           {data.recentMovements.length === 0 ? (
             <p className="text-sm text-slate-500">No movements yet.</p>
           ) : (

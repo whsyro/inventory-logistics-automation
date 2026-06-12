@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Building2 } from 'lucide-react';
 import { apiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Button, Card, Field, Input } from '../components/ui';
@@ -32,8 +33,10 @@ export function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
       <Card className="w-full max-w-sm p-8">
         <div className="mb-6 text-center">
-          <div className="text-3xl">🏢</div>
-          <h1 className="mt-2 text-xl font-bold text-slate-900">Create your company</h1>
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white">
+            <Building2 size={26} />
+          </div>
+          <h1 className="mt-3 text-xl font-bold text-slate-900">Create your company</h1>
           <p className="text-sm text-slate-500">You'll become its admin and can invite your team.</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">

@@ -32,6 +32,7 @@ model Company {
   suppliers      Supplier[]
   purchaseOrders PurchaseOrder[]
   shipments      Shipment[]
+  carriers       Carrier[]
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +205,27 @@ model PurchaseOrderItem {
 }
 
 // ---------------------------------------------------------------------------
-// Shipments (outbound)
+// Freight (carriers) & shipments (outbound)
 // ---------------------------------------------------------------------------
+model Carrier {
+  id            String   @id @default(cuid())
+  name          String
+  contactName   String?
+  email         String?
+  phone         String?
+  accountNumber String?
+  serviceLevels String? // e.g. "Ground, Express, Overnight"
+  notes         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  shipments Shipment[]
+}
+
 model Shipment {
   id             String    @id @default(cuid())
   number         String
@@ -213,8 +233,8 @@ model Shipment {
   status         String    @default("PENDING") // PENDING | PICKING | SHIPPED | DELIVERED | CANCELLED
   customerName   String
   address        String?
-  carrier        String?
   trackingNumber String?
+  freightCost    Float     @default(0) // what the freight (shipping) costs
   notes          String?
   shippedAt      DateTime?
   deliveredAt    DateTime?
@@ -224,6 +244,9 @@ model Shipment {
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
+
+  carrierId String?
+  carrier   Carrier? @relation(fields: [carrierId], references: [id])
 
   warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
   createdBy User?          @relation(fields: [createdById], references: [id])

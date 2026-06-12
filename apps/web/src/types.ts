@@ -6,6 +6,7 @@ export interface User {
   name: string;
   role: Role;
   companyId: string;
+  companyName?: string;
 }
 
 export interface ManagedUser {
@@ -54,6 +55,21 @@ export interface Supplier {
   isActive: boolean;
   _count?: { products: number; purchaseOrders: number };
   products?: { id: string; sku: string; name: string }[];
+}
+
+export interface WarehouseDetail extends Warehouse {
+  metrics: { skuCount: number; unitsOnHand: number; inventoryValue: number; openPoCount: number };
+  stock: { productId: string; sku: string; name: string; unit: string; quantity: number }[];
+  recentMovements: {
+    id: string;
+    type: string;
+    quantity: number;
+    reason?: string | null;
+    reference?: string | null;
+    createdAt: string;
+    product: { sku: string; name: string };
+    user?: { name: string } | null;
+  }[];
 }
 
 export interface StockLevel {
@@ -118,6 +134,56 @@ export interface PurchaseOrder {
   items?: PoItem[];
   itemCount?: number;
   total?: number;
+}
+
+export type ShipmentStatus =
+  | 'PENDING'
+  | 'PICKING'
+  | 'SHIPPED'
+  | 'DELIVERED'
+  | 'CANCELLED';
+
+export interface ShipmentItem {
+  id: string;
+  productId: string;
+  quantity: number;
+  product?: { id: string; sku: string; name: string; unit: string };
+}
+
+export interface Carrier {
+  id: string;
+  name: string;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  accountNumber?: string | null;
+  serviceLevels?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  shipmentCount?: number;
+  freightSpend?: number;
+}
+
+export interface Shipment {
+  id: string;
+  number: string;
+  status: ShipmentStatus;
+  warehouseId: string;
+  customerName: string;
+  address?: string | null;
+  carrierId?: string | null;
+  carrier?: { id: string; name: string } | null;
+  trackingNumber?: string | null;
+  freightCost: number;
+  notes?: string | null;
+  shippedAt?: string | null;
+  deliveredAt?: string | null;
+  createdAt: string;
+  warehouse?: { id: string; code: string; name: string } | null;
+  createdBy?: { name: string } | null;
+  items?: ShipmentItem[];
+  itemCount?: number;
+  totalUnits?: number;
 }
 
 export interface DashboardData {

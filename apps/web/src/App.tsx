@@ -6,9 +6,13 @@ import { RegisterPage } from './pages/RegisterPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { InventoryPage } from './pages/InventoryPage';
+import { WarehousesPage } from './pages/WarehousesPage';
 import { SuppliersPage } from './pages/SuppliersPage';
 import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
 import { PurchaseOrderDetailPage } from './pages/PurchaseOrderDetailPage';
+import { ShipmentsPage } from './pages/ShipmentsPage';
+import { ShipmentDetailPage } from './pages/ShipmentDetailPage';
+import { CarriersPage } from './pages/CarriersPage';
 import { UsersPage } from './pages/UsersPage';
 import type { Role } from './types';
 
@@ -46,11 +50,13 @@ export function App() {
         <Route index element={<DashboardPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="inventory" element={<InventoryPage />} />
+        <Route path="warehouses" element={<WarehousesPage />} />
         <Route path="suppliers" element={<SuppliersPage />} />
         <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
-        {/* Shipments: intentionally left blank until we build it. */}
-        <Route path="shipments" element={<div />} />
+        <Route path="shipments" element={<ShipmentsPage />} />
+        <Route path="shipments/:id" element={<ShipmentDetailPage />} />
+        <Route path="carriers" element={<CarriersPage />} />
         <Route
           path="users"
           element={

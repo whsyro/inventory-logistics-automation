@@ -18,7 +18,10 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { email, password } = parse(loginSchema, req.body);
 
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      include: { company: { select: { name: true } } },
+    });
     if (!user || !user.isActive) throw unauthorized('Invalid credentials');
 
     const ok = await verifyPassword(password, user.passwordHash);
@@ -32,7 +35,7 @@ authRouter.post(
       companyId: user.companyId,
     };
     const token = signToken(authUser);
-    res.json({ token, user: authUser });
+    res.json({ token, user: { ...authUser, companyName: user.company.name } });
   }),
 );
 
@@ -75,7 +78,7 @@ authRouter.post(
       companyId: user.companyId,
     };
     const token = signToken(authUser);
-    res.status(201).json({ token, user: authUser });
+    res.status(201).json({ token, user: { ...authUser, companyName } });
   }),
 );
 
@@ -83,6 +86,10 @@ authRouter.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ user: req.user });
+    const company = await prisma.company.findUnique({
+      where: { id: req.user!.companyId },
+      select: { name: true },
+    });
+    res.json({ user: { ...req.user, companyName: company?.name ?? null } });
   }),
 );

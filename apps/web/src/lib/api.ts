@@ -33,10 +33,19 @@ api.interceptors.response.use(
   },
 );
 
-/** Extract a human-friendly message from an axios error. */
+/** Extract a human-friendly message from an axios error, including field details. */
 export function apiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    return err.response?.data?.error ?? err.message;
+    const data = err.response?.data as { error?: string; details?: Record<string, string[]> } | undefined;
+    const base = data?.error ?? err.message;
+    // Zod validation errors include per-field messages — surface them.
+    if (data?.details && typeof data.details === 'object') {
+      const fields = Object.entries(data.details)
+        .filter(([, msgs]) => Array.isArray(msgs) && msgs.length)
+        .map(([field, msgs]) => `${field}: ${msgs.join(', ')}`);
+      if (fields.length) return `${base} — ${fields.join('; ')}`;
+    }
+    return base;
   }
   return err instanceof Error ? err.message : 'Something went wrong';
 }
