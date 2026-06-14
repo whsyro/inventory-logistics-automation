@@ -4,11 +4,30 @@ import { useNavigate } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { money, poStatusLabel, poStatusTone, shortDate } from '../lib/format';
+import { exportExcel, exportPdf, type ExportColumn } from '../lib/export';
 import type { Product, PurchaseOrder, Supplier, Warehouse } from '../types';
 import { Badge, Button, Card, Field, Input, PageHeader } from '../components/ui';
+import { ExportMenu } from '../components/ExportMenu';
+
+// Columns shared by the Excel and PDF purchase-order list exports.
+const PO_EXPORT_COLUMNS: ExportColumn<PurchaseOrder>[] = [
+  { header: 'PO #', value: (po) => po.number, width: 14 },
+  { header: 'Supplier', value: (po) => po.supplier?.name ?? '', width: 24 },
+  { header: 'Status', value: (po) => poStatusLabel[po.status], width: 18 },
+  { header: 'Expected', value: (po) => shortDate(po.expectedAt), width: 14 },
+  { header: 'Lines', value: (po) => po.itemCount ?? 0, align: 'right', width: 10 },
+  {
+    header: 'Total',
+    value: (po) => po.total ?? 0,
+    display: (po) => money(po.total ?? 0),
+    numFmt: '$#,##0.00',
+    align: 'right',
+    width: 14,
+  },
+];
 
 export function PurchaseOrdersPage() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -19,20 +38,38 @@ export function PurchaseOrdersPage() {
     queryFn: async () => (await api.get<PurchaseOrder[]>('/purchase-orders')).data,
   });
 
+  const exportRows = orders ?? [];
+  const exportTable = { name: 'Purchase Orders', columns: PO_EXPORT_COLUMNS, rows: exportRows };
+  const exportMeta = [
+    `Generated ${new Date().toLocaleString()}`,
+    `${exportRows.length} purchase order${exportRows.length === 1 ? '' : 's'}`,
+  ];
+  const onExcel = () => exportExcel('purchase-orders', [exportTable]);
+  const onPdf = () =>
+    exportPdf({
+      filename: 'purchase-orders',
+      title: `Purchase Orders${user?.companyName ? ` — ${user.companyName}` : ''}`,
+      meta: exportMeta,
+      tables: [exportTable],
+    });
+
   return (
     <div>
       <PageHeader
         title="Purchase Orders"
         subtitle="Order stock from suppliers and receive it into inventory"
         action={
-          hasRole('ADMIN', 'MANAGER') && (
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setShowReorder(true)}>
-                ⚠ Reorder low-stock
-              </Button>
-              <Button onClick={() => setShowForm(true)}>+ New PO</Button>
-            </div>
-          )
+          <div className="flex gap-2">
+            <ExportMenu disabled={exportRows.length === 0} onExcel={onExcel} onPdf={onPdf} />
+            {hasRole('ADMIN', 'MANAGER') && (
+              <>
+                <Button variant="secondary" onClick={() => setShowReorder(true)}>
+                  ⚠ Reorder low-stock
+                </Button>
+                <Button onClick={() => setShowForm(true)}>+ New PO</Button>
+              </>
+            )}
+          </div>
         }
       />
 

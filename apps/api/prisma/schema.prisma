@@ -12,9 +12,12 @@ generator client {
 }
 
 datasource db {
-  // For production: change to "postgresql" and set DATABASE_URL accordingly.
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  // Hosted Postgres (Supabase). DATABASE_URL = pooled connection (Supavisor, port
+  // 6543, ?pgbouncer=true) used by the app; DIRECT_URL = direct connection (port
+  // 5432) used by Prisma Migrate. See apps/api/.env.example for the format.
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +57,8 @@ model User {
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
   shipments      Shipment[]
+
+  productVisibility ProductVisibility[]
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +98,7 @@ model Product {
   unitPrice    Float    @default(0) // sale price
   reorderPoint Int      @default(0) // alert at/below this total quantity
   reorderQty   Int      @default(0) // suggested reorder quantity
+  visibility   String   @default("COMPANY") // COMPANY | RESTRICTED | ADMINS_ONLY (see constants.ts)
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -107,8 +113,35 @@ model Product {
   stockMovements     StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
   shipmentItems      ShipmentItem[]
+  visibleTo          ProductVisibility[]
+  hiddenRoles        ProductHiddenRole[]
 
   @@unique([companyId, sku])
+}
+
+// Per-user product visibility, used when Product.visibility is RESTRICTED: the
+// product is visible only to the listed users (admins always see all products).
+model ProductVisibility {
+  productId String
+  userId    String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([productId, userId])
+  @@index([userId])
+}
+
+// Roles a product is hidden from, used when Product.visibility is BY_ROLE. A user
+// whose role is listed here cannot see the product. Only non-admin roles appear
+// (admins always retain access). See HIDEABLE_ROLES in constants.ts.
+model ProductHiddenRole {
+  productId String
+  role      String // MANAGER | STAFF
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([productId, role])
 }
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,25 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiError } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { exportExcel, exportPdf, type ExportColumn } from '../lib/export';
 import type { Product, StockLevel, Warehouse } from '../types';
 import { Badge, Button, Card, Field, Input, PageHeader } from '../components/ui';
+import { ExportMenu } from '../components/ExportMenu';
+
+// Columns shared by the Excel and PDF inventory exports.
+const INVENTORY_EXPORT_COLUMNS: ExportColumn<StockLevel>[] = [
+  { header: 'Product', value: (l) => l.product.name, width: 28 },
+  { header: 'SKU', value: (l) => l.product.sku, width: 16 },
+  { header: 'Supplier', value: (l) => l.product.supplier?.name ?? '', width: 22 },
+  { header: 'Warehouse', value: (l) => l.warehouse.name, width: 20 },
+  { header: 'Quantity', value: (l) => l.quantity, align: 'right', width: 12 },
+  { header: 'Unit', value: (l) => l.product.unit, width: 10 },
+  { header: 'Reorder point', value: (l) => l.product.reorderPoint, align: 'right', width: 14 },
+];
 
 export function InventoryPage() {
+  const { user } = useAuth();
   const qc = useQueryClient();
   const [warehouseId, setWarehouseId] = useState('');
   const [showAdjust, setShowAdjust] = useState<'adjust' | 'move' | null>(null);
@@ -21,6 +36,25 @@ export function InventoryPage() {
         .data,
   });
 
+  // Export whatever is currently listed (respects the warehouse filter).
+  const exportRows = levels ?? [];
+  const warehouseName = warehouseId
+    ? warehouses?.find((w) => w.id === warehouseId)?.name ?? 'Selected warehouse'
+    : 'All warehouses';
+  const exportTable = { name: 'Inventory', columns: INVENTORY_EXPORT_COLUMNS, rows: exportRows };
+  const exportMeta = [
+    `Generated ${new Date().toLocaleString()}`,
+    `${warehouseName} · ${exportRows.length} record${exportRows.length === 1 ? '' : 's'}`,
+  ];
+  const onExcel = () => exportExcel('inventory', [exportTable]);
+  const onPdf = () =>
+    exportPdf({
+      filename: 'inventory',
+      title: `Inventory${user?.companyName ? ` — ${user.companyName}` : ''}`,
+      meta: exportMeta,
+      tables: [exportTable],
+    });
+
   return (
     <div>
       <PageHeader
@@ -28,6 +62,7 @@ export function InventoryPage() {
         subtitle="Stock levels by product and warehouse"
         action={
           <div className="flex gap-2">
+            <ExportMenu disabled={exportRows.length === 0} onExcel={onExcel} onPdf={onPdf} />
             <Button variant="secondary" onClick={() => setShowAdjust('move')}>⇄ Move stock</Button>
             <Button onClick={() => setShowAdjust('adjust')}>± Adjust stock</Button>
           </div>

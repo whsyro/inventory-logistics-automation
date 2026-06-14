@@ -4,14 +4,60 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { money, poStatusLabel, poStatusTone, shortDate } from '../lib/format';
-import type { PoItem, PurchaseOrder } from '../types';
+import { exportExcel, exportPdf, type ExportColumn } from '../lib/export';
+import type { PoItem, PoReceiptHistory, PurchaseOrder } from '../types';
 import { Badge, Button, Card } from '../components/ui';
+import { ExportMenu } from '../components/ExportMenu';
 
 const dateTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
 
+// Columns shared by the Excel and PDF purchase-order exports.
+const PO_ITEM_COLUMNS: ExportColumn<PoItem>[] = [
+  { header: 'Product', value: (i) => i.product?.name ?? '', width: 28 },
+  { header: 'SKU', value: (i) => i.product?.sku ?? '', width: 16 },
+  { header: 'Ordered', value: (i) => i.quantity, align: 'right', width: 12 },
+  { header: 'Received', value: (i) => i.receivedQty, align: 'right', width: 12 },
+  {
+    header: 'Remaining',
+    value: (i) => Math.max(i.quantity - i.receivedQty, 0),
+    align: 'right',
+    width: 12,
+  },
+  {
+    header: 'Unit cost',
+    value: (i) => i.unitCost,
+    display: (i) => money(i.unitCost),
+    numFmt: '$#,##0.00',
+    align: 'right',
+    width: 14,
+  },
+  {
+    header: 'Line total',
+    value: (i) => i.quantity * i.unitCost,
+    display: (i) => money(i.quantity * i.unitCost),
+    numFmt: '$#,##0.00',
+    align: 'right',
+    width: 14,
+  },
+];
+
+const PO_RECEIPT_COLUMNS: ExportColumn<PoReceiptHistory>[] = [
+  { header: 'Arrived', value: (r) => new Date(r.createdAt).toLocaleString(), width: 22 },
+  { header: 'Product', value: (r) => r.product.name, width: 26 },
+  { header: 'SKU', value: (r) => r.product.sku, width: 16 },
+  { header: 'Warehouse', value: (r) => r.warehouse.name, width: 18 },
+  { header: 'Received', value: (r) => r.quantity, align: 'right', width: 12 },
+  { header: 'By', value: (r) => r.user?.name ?? '', width: 18 },
+];
+
+const PO_SUMMARY_COLUMNS: ExportColumn<{ field: string; value: string }>[] = [
+  { header: 'Field', value: (r) => r.field, width: 24 },
+  { header: 'Value', value: (r) => r.value, width: 46 },
+];
+
 export function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [showReceive, setShowReceive] = useState(false);
@@ -70,6 +116,49 @@ export function PurchaseOrderDetailPage() {
   const canCancel =
     po.status !== 'RECEIVED' && po.status !== 'CANCELLED' && po.status !== 'DECLINED';
 
+  // --- Export (summary + line items + receipt history) ---
+  const items = po.items ?? [];
+  const receipts = po.receiptHistory ?? [];
+  const summaryRows = [
+    { field: 'PO number', value: po.number },
+    { field: 'Supplier', value: po.supplier?.name ?? '—' },
+    { field: 'Status', value: poStatusLabel[po.status] },
+    { field: 'Destination warehouse', value: po.warehouse?.name ?? '—' },
+    { field: 'Expected', value: shortDate(po.expectedAt) },
+    ...(po.status === 'PARTIALLY_RECEIVED'
+      ? [{ field: 'Remaining expected', value: shortDate(po.nextExpectedAt) }]
+      : []),
+    { field: 'Order total', value: money(total) },
+    { field: 'Paid', value: money(receivedTotal) },
+    { field: 'Remaining to pay', value: money(remainingTotal) },
+    ...(po.notes ? [{ field: 'Notes', value: po.notes }] : []),
+  ];
+  const onExcel = () =>
+    exportExcel(po.number, [
+      { name: 'Summary', columns: PO_SUMMARY_COLUMNS, rows: summaryRows },
+      { name: 'Line items', columns: PO_ITEM_COLUMNS, rows: items },
+      { name: 'Receipt history', columns: PO_RECEIPT_COLUMNS, rows: receipts },
+    ]);
+  const onPdf = () =>
+    exportPdf({
+      filename: po.number,
+      title: `Purchase Order ${po.number}${user?.companyName ? ` — ${user.companyName}` : ''}`,
+      meta: [
+        `Supplier: ${po.supplier?.name ?? '—'}    Status: ${poStatusLabel[po.status]}`,
+        `Warehouse: ${po.warehouse?.name ?? '—'}    Expected: ${shortDate(po.expectedAt)}` +
+          (po.status === 'PARTIALLY_RECEIVED'
+            ? `    Remaining expected: ${shortDate(po.nextExpectedAt)}`
+            : ''),
+        `Order total: ${money(total)}    Paid: ${money(receivedTotal)}    Remaining: ${money(remainingTotal)}`,
+        `Generated ${new Date().toLocaleString()}`,
+        ...(po.notes ? [`Notes: ${po.notes}`] : []),
+      ],
+      tables: [
+        { name: 'Line items', columns: PO_ITEM_COLUMNS, rows: items },
+        { name: 'Receipt history', columns: PO_RECEIPT_COLUMNS, rows: receipts },
+      ],
+    });
+
   return (
     <div>
       <Link to="/purchase-orders" className="text-sm text-indigo-600 hover:underline">
@@ -90,21 +179,28 @@ export function PurchaseOrderDetailPage() {
               : ''}
           </p>
         </div>
-        {canEdit && (
-          <div className="flex gap-2">
-            {po.status === 'DRAFT' && (
-              <Button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
-                {submitMutation.isPending ? 'Sending…' : 'Submit & email supplier'}
-              </Button>
-            )}
-            {canReceive && <Button onClick={() => setShowReceive(true)}>Receive stock</Button>}
-            {canCancel && (
-              <Button variant="danger" onClick={() => cancelMutation.mutate()}>
-                Cancel
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="flex gap-2">
+          <ExportMenu
+            disabled={items.length === 0 && receipts.length === 0}
+            onExcel={onExcel}
+            onPdf={onPdf}
+          />
+          {canEdit && (
+            <>
+              {po.status === 'DRAFT' && (
+                <Button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
+                  {submitMutation.isPending ? 'Sending…' : 'Submit & email supplier'}
+                </Button>
+              )}
+              {canReceive && <Button onClick={() => setShowReceive(true)}>Receive stock</Button>}
+              {canCancel && (
+                <Button variant="danger" onClick={() => cancelMutation.mutate()}>
+                  Cancel
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {actionError && <p className="mb-4 text-sm text-red-600">{actionError}</p>}

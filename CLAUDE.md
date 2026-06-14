@@ -19,8 +19,13 @@ npm run build            # build both apps (this is the type-check gate; see bel
 npm run db:migrate       # prisma migrate dev; add a name with:  npm run db:migrate -- --name my_change
 npm run db:seed          # load demo company + users/products/suppliers (fresh DBs)
 npm run db:studio        # visual DB browser
-npm run db:reset         # DROP + recreate + reseed (destructive; Prisma asks for AI consent)
+
+# These exist only in the @ila/api workspace (the root forwards db:migrate/db:seed/db:studio):
+npm run db:reset -w @ila/api      # DROP + recreate + reseed (destructive; Prisma prompts to confirm)
+npm run db:generate -w @ila/api   # regenerate Prisma Client after a schema change
 ```
+
+API health check (for scripted verification): `GET /api/health` → `{ status: 'ok', time }`. `PORT` defaults to 4000.
 
 Per-app build/type-check: `npm run build -w @ila/api` (`tsc`) and `npm run build -w @ila/web` (`tsc -b && vite build`).
 
@@ -28,7 +33,7 @@ Per-app build/type-check: `npm run build -w @ila/api` (`tsc`) and `npm run build
 
 ## Architecture
 
-Monorepo: `apps/api` (Express + Prisma + SQLite, ESM/NodeNext, run via `tsx`) and `apps/web` (React 18 + Vite + Tailwind v4 + TanStack Query). Schema is the source of truth at `apps/api/prisma/schema.prisma`; SQLite in dev, Postgres-ready by switching the `provider` + `DATABASE_URL`.
+Monorepo: `apps/api` (Express + Prisma + PostgreSQL, ESM/NodeNext, run via `tsx`) and `apps/web` (React 18 + Vite + Tailwind v4 + TanStack Query). Schema is the source of truth at `apps/api/prisma/schema.prisma`. The database is **Supabase Postgres**: `DATABASE_URL` is the pooled connection (Supavisor, port 6543, `?pgbouncer=true`) used by the app, and `DIRECT_URL` is the direct connection (port 5432) used by Prisma Migrate (`directUrl` in the datasource). The schema stays connector-portable (String-typed enums, no DB-native types), so it can fall back to SQLite by flipping the `provider` + `DATABASE_URL`.
 
 These cross-cutting invariants matter more than any single file:
 
@@ -54,4 +59,4 @@ These cross-cutting invariants matter more than any single file:
 
 ## Working with the database (Windows)
 
-The running dev server holds the SQLite file and the Prisma query-engine DLL open. **Stop the dev server before `db:migrate`/`db:generate`** or `prisma generate` fails with `EPERM` (cannot rename the engine DLL) and migrations may hit a lock. For schema changes against a populated DB, follow the established two-step pattern (add the column as optional → backfill data → make it required + add constraints) rather than a single destructive migration — `db:reset` wipes real tenant data.
+The running dev server holds the Prisma query-engine DLL open. **Stop the dev server before `db:migrate`/`db:generate`** or `prisma generate` fails with `EPERM` (cannot rename the engine DLL). The DB is now remote (Supabase), so there's no SQLite file lock, but Prisma Migrate needs `DIRECT_URL` set (the pooled `DATABASE_URL` alone won't run migrations). `prisma migrate dev` also needs to create a temporary **shadow database**; the Supabase direct-connection role can normally do this — if it can't, add a `shadowDatabaseUrl`. For schema changes against a populated DB, follow the established two-step pattern (add the column as optional → backfill data → make it required + add constraints) rather than a single destructive migration — `db:reset` wipes the whole database.

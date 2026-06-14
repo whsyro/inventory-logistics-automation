@@ -1,5 +1,10 @@
 export type Role = 'ADMIN' | 'MANAGER' | 'STAFF';
 
+export type ProductVisibility = 'COMPANY' | 'RESTRICTED' | 'BY_ROLE' | 'ADMINS_ONLY';
+
+// Non-admin roles a product can be hidden from (admins always retain access).
+export type HideableRole = 'MANAGER' | 'STAFF';
+
 export interface User {
   id: string;
   email: string;
@@ -34,6 +39,11 @@ export interface Product {
   supplierId?: string | null;
   supplier?: { id: string; name: string } | null;
   totalStock?: number;
+  // Visibility mode, the users allowed when RESTRICTED, and the roles hidden when
+  // BY_ROLE (admins always see all).
+  visibility?: ProductVisibility;
+  visibleTo?: { userId: string }[];
+  hiddenRoles?: { role: HideableRole }[];
 }
 
 export interface Warehouse {

@@ -3,6 +3,9 @@ import { z } from 'zod';
 
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
+  // Direct (non-pooled) Postgres connection, used only by Prisma Migrate. Not
+  // needed to run the server, so it's optional here.
+  DIRECT_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   PORT: z.coerce.number().default(4000),

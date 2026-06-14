@@ -2,8 +2,44 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import type { Product, Supplier } from '../types';
+import { money } from '../lib/format';
+import { exportExcel, exportPdf, type ExportColumn } from '../lib/export';
+import type { HideableRole, ManagedUser, Product, ProductVisibility, Supplier } from '../types';
 import { Badge, Button, Card, Field, Input, PageHeader } from '../components/ui';
+import { ExportMenu } from '../components/ExportMenu';
+
+// Columns shared by the Excel and PDF product exports.
+const PRODUCT_EXPORT_COLUMNS: ExportColumn<Product>[] = [
+  { header: 'SKU', value: (p) => p.sku, width: 16 },
+  { header: 'Name', value: (p) => p.name, width: 28 },
+  { header: 'Category', value: (p) => p.category ?? '', width: 18 },
+  { header: 'Unit', value: (p) => p.unit, width: 10 },
+  { header: 'Supplier', value: (p) => p.supplier?.name ?? '', width: 22 },
+  { header: 'In stock', value: (p) => p.totalStock ?? 0, align: 'right', width: 12 },
+  { header: 'Reorder point', value: (p) => p.reorderPoint, align: 'right', width: 14 },
+  {
+    header: 'Unit cost',
+    value: (p) => p.unitCost,
+    display: (p) => money(p.unitCost),
+    numFmt: '$#,##0.00',
+    align: 'right',
+    width: 14,
+  },
+  {
+    header: 'Unit price',
+    value: (p) => p.unitPrice,
+    display: (p) => money(p.unitPrice),
+    numFmt: '$#,##0.00',
+    align: 'right',
+    width: 14,
+  },
+];
+
+// Non-admin roles a product can be hidden from, with friendly labels.
+const HIDEABLE_ROLE_OPTIONS: { role: HideableRole; label: string }[] = [
+  { role: 'MANAGER', label: 'Managers' },
+  { role: 'STAFF', label: 'Staff' },
+];
 
 /** Number input with a leading "$" so the currency is obvious. */
 function MoneyInput({
@@ -49,7 +85,7 @@ const UNIT_OPTIONS = [
 ];
 
 export function ProductsPage() {
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const qc = useQueryClient();
   const canEdit = hasRole('ADMIN', 'MANAGER');
   const [search, setSearch] = useState('');
@@ -70,12 +106,35 @@ export function ProductsPage() {
   const cols = canEdit ? 9 : 8;
   const formOpen = showCreate || editing !== null;
 
+  // Export whatever is currently listed (respects the search / low-stock filters).
+  const exportRows = products ?? [];
+  const exportTable = { name: 'Products', columns: PRODUCT_EXPORT_COLUMNS, rows: exportRows };
+  const exportMeta = [
+    `Generated ${new Date().toLocaleString()}`,
+    `${exportRows.length} product${exportRows.length === 1 ? '' : 's'}` +
+      (lowOnly ? ' · low stock only' : '') +
+      (search ? ` · search: "${search}"` : ''),
+  ];
+  const onExcel = () => exportExcel('products', [exportTable]);
+  const onPdf = () =>
+    exportPdf({
+      filename: 'products',
+      title: `Products${user?.companyName ? ` — ${user.companyName}` : ''}`,
+      meta: exportMeta,
+      tables: [exportTable],
+    });
+
   return (
     <div>
       <PageHeader
         title="Products"
         subtitle="Your catalog and current stock levels"
-        action={canEdit && <Button onClick={() => setShowCreate(true)}>+ New product</Button>}
+        action={
+          <div className="flex items-center gap-2">
+            <ExportMenu disabled={exportRows.length === 0} onExcel={onExcel} onPdf={onPdf} />
+            {canEdit && <Button onClick={() => setShowCreate(true)}>+ New product</Button>}
+          </div>
+        }
       />
 
       <div className="mb-4 flex items-center gap-3">
@@ -187,6 +246,8 @@ function ProductForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole('ADMIN');
   const isEdit = product !== null;
   const [form, setForm] = useState({
     sku: product?.sku ?? '',
@@ -199,6 +260,17 @@ function ProductForm({
     reorderQty: String(product?.reorderQty ?? 0),
     supplierId: product?.supplierId ?? '',
   });
+  // Visibility (admin only): mode + the per-user list (RESTRICTED) and the hidden
+  // role list (BY_ROLE).
+  const [visibility, setVisibility] = useState<ProductVisibility>(
+    () => product?.visibility ?? 'COMPANY',
+  );
+  const [visibleUserIds, setVisibleUserIds] = useState<string[]>(
+    () => product?.visibleTo?.map((v) => v.userId) ?? [],
+  );
+  const [hiddenRoles, setHiddenRoles] = useState<HideableRole[]>(
+    () => product?.hiddenRoles?.map((h) => h.role) ?? [],
+  );
   const [error, setError] = useState('');
 
   const { data: suppliers } = useQuery({
@@ -206,12 +278,28 @@ function ProductForm({
     queryFn: async () => (await api.get<Supplier[]>('/suppliers')).data,
   });
 
+  // Only admins can scope visibility, and only they can read the user directory.
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => (await api.get<ManagedUser[]>('/users')).data,
+    enabled: isAdmin,
+  });
+  const selectableUsers = users?.filter((u) => u.isActive && u.role !== 'ADMIN') ?? [];
+
+  const toggleUser = (id: string) =>
+    setVisibleUserIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+  const toggleRole = (role: HideableRole) =>
+    setHiddenRoles((rs) => (rs.includes(role) ? rs.filter((x) => x !== role) : [...rs, role]));
+
   const mutation = useMutation({
     mutationFn: async () => {
       const payload = {
         ...form,
         supplierId: form.supplierId || null,
         category: form.category || null,
+        // Send visibility only for admins; managers leave it untouched.
+        ...(isAdmin ? { visibility, visibleUserIds, hiddenRoles } : {}),
       };
       return isEdit ? api.put(`/products/${product.id}`, payload) : api.post('/products', payload);
     },
@@ -289,6 +377,85 @@ function ProductForm({
               </select>
             </Field>
           </div>
+
+          {isAdmin && (
+            <div className="col-span-2">
+              <Field label="Who can see this product">
+                <select
+                  value={visibility}
+                  onChange={(e) => setVisibility(e.target.value as ProductVisibility)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                >
+                  <option value="COMPANY">Everyone in the company</option>
+                  <option value="RESTRICTED">Only specific people</option>
+                  <option value="BY_ROLE">Hide from certain roles</option>
+                  <option value="ADMINS_ONLY">Hidden from employees (admins only)</option>
+                </select>
+
+                {visibility === 'RESTRICTED' &&
+                  (selectableUsers.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-400">No employees to choose from yet.</p>
+                  ) : (
+                    <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-300 p-2">
+                      {selectableUsers.map((u) => (
+                        <label
+                          key={u.id}
+                          className="flex items-center gap-2 rounded px-2 py-1 text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={visibleUserIds.includes(u.id)}
+                            onChange={() => toggleUser(u.id)}
+                          />
+                          <span className="font-medium text-slate-800">{u.name}</span>
+                          <span className="text-slate-400">{u.email}</span>
+                          <Badge tone="gray">{u.role}</Badge>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+
+                {visibility === 'BY_ROLE' && (
+                  <div className="mt-2 space-y-1 rounded-lg border border-slate-300 p-2">
+                    <p className="px-2 pb-1 text-xs text-slate-500">Hide this product from:</p>
+                    {HIDEABLE_ROLE_OPTIONS.map((opt) => (
+                      <label
+                        key={opt.role}
+                        className="flex items-center gap-2 rounded px-2 py-1 text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={hiddenRoles.includes(opt.role)}
+                          onChange={() => toggleRole(opt.role)}
+                        />
+                        <span className="font-medium text-slate-800">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <p className="mt-1 text-xs text-slate-500">
+                  {visibility === 'COMPANY'
+                    ? 'Every employee in your company can see this product.'
+                    : visibility === 'ADMINS_ONLY'
+                      ? 'Hidden from all employees — only admins can see it.'
+                      : visibility === 'BY_ROLE'
+                        ? hiddenRoles.length === 0
+                          ? 'No roles hidden yet — everyone can see it. Check a role to hide it.'
+                          : `Hidden from ${hiddenRoles
+                              .map((r) => HIDEABLE_ROLE_OPTIONS.find((o) => o.role === r)?.label)
+                              .join(' and ')}. Admins always have access.`
+                        : visibleUserIds.length === 0
+                          ? 'Pick at least one person, or it stays hidden from all employees.'
+                          : `Visible to ${visibleUserIds.length} selected ${
+                              visibleUserIds.length === 1 ? 'person' : 'people'
+                            } (plus admins).`}
+                </p>
+              </Field>
+            </div>
+          )}
 
           {error && <p className="col-span-2 text-sm text-red-600">{error}</p>}
 
