@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, apiError } from '../lib/api';
@@ -12,6 +12,7 @@ export function PurchaseOrdersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [showReorder, setShowReorder] = useState(false);
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['purchase-orders'],
@@ -24,7 +25,14 @@ export function PurchaseOrdersPage() {
         title="Purchase Orders"
         subtitle="Order stock from suppliers and receive it into inventory"
         action={
-          hasRole('ADMIN', 'MANAGER') && <Button onClick={() => setShowForm(true)}>+ New PO</Button>
+          hasRole('ADMIN', 'MANAGER') && (
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowReorder(true)}>
+                ⚠ Reorder low-stock
+              </Button>
+              <Button onClick={() => setShowForm(true)}>+ New PO</Button>
+            </div>
+          )
         }
       />
 
@@ -84,6 +92,16 @@ export function PurchaseOrdersPage() {
             setShowForm(false);
             qc.invalidateQueries({ queryKey: ['purchase-orders'] });
             navigate(`/purchase-orders/${id}`);
+          }}
+        />
+      )}
+      {showReorder && (
+        <ReorderModal
+          onClose={() => setShowReorder(false)}
+          onSaved={(ids) => {
+            setShowReorder(false);
+            qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+            if (ids.length === 1) navigate(`/purchase-orders/${ids[0]}`);
           }}
         />
       )}
@@ -258,10 +276,12 @@ function PoForm({ onClose, onSaved }: { onClose: () => void; onSaved: (id: strin
                     disabled={!supplierId}
                     className={`${selectCls} flex-1 disabled:bg-slate-50`}
                   >
-                    <option value="">{supplierId ? '— Product —' : '— Select a supplier first —'}</option>
+                    <option value="" disabled>
+                      {supplierId ? '— Select product —' : '— Select a supplier first —'}
+                    </option>
                     {supplierProducts.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({p.sku})
+                        {p.name}
                       </option>
                     ))}
                   </select>
@@ -310,6 +330,270 @@ function PoForm({ onClose, onSaved }: { onClose: () => void; onSaved: (id: strin
             </Button>
           </div>
         </form>
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reorder low-stock modal
+// ---------------------------------------------------------------------------
+
+interface ReorderRow {
+  product: Product;
+  selected: boolean;
+  quantity: string;
+}
+
+function ReorderModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (ids: string[]) => void;
+}) {
+  const [rows, setRows] = useState<ReorderRow[]>([]);
+  const [warehouseId, setWarehouseId] = useState('');
+  const [expectedAt, setExpectedAt] = useState('');
+  const [error, setError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const { data: lowStockProducts, isLoading: loadingLowStock } = useQuery({
+    queryKey: ['products', '', true],
+    queryFn: async () => (await api.get<Product[]>('/products?lowStock=true')).data,
+  });
+
+  useEffect(() => {
+    if (lowStockProducts) {
+      setRows(
+        lowStockProducts.map((p) => ({
+          product: p,
+          selected: true,
+          quantity: String(p.reorderQty > 0 ? p.reorderQty : 1),
+        })),
+      );
+    }
+  }, [lowStockProducts]);
+
+  const { data: warehouses } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: async () => (await api.get<Warehouse[]>('/warehouses')).data,
+  });
+
+  useEffect(() => {
+    if (warehouses && warehouses.length > 0 && !warehouseId) {
+      setWarehouseId(warehouses[0].id);
+    }
+  }, [warehouses, warehouseId]);
+
+  const toggleRow = (idx: number) =>
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, selected: !r.selected } : r)));
+
+  const setQty = (idx: number, value: string) =>
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, quantity: value } : r)));
+
+  const selectedRows = rows.filter((r) => r.selected && r.product.supplierId);
+
+  // Group selected rows by supplierId to create one PO per supplier.
+  const bySupplier = selectedRows.reduce<Record<string, ReorderRow[]>>((acc, r) => {
+    const sid = r.product.supplierId!;
+    if (!acc[sid]) acc[sid] = [];
+    acc[sid].push(r);
+    return acc;
+  }, {});
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const created: string[] = [];
+      for (const [supplierId, supplierRows] of Object.entries(bySupplier)) {
+        const res = await api.post<PurchaseOrder>('/purchase-orders', {
+          supplierId,
+          warehouseId,
+          expectedAt: expectedAt || null,
+          notes: 'Auto-generated reorder for low-stock products',
+          items: supplierRows.map((r) => ({
+            productId: r.product.id,
+            quantity: Math.max(1, Number(r.quantity) || 1),
+            unitCost: r.product.unitCost,
+          })),
+        });
+        created.push(res.data.id);
+      }
+      return created;
+    },
+    onSuccess: (ids) => onSaved(ids),
+    onError: (err) => setError(apiError(err)),
+  });
+
+  const noSupplier = rows.filter((r) => r.selected && !r.product.supplierId);
+
+  const selectCls =
+    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500';
+
+  return (
+    <div className="fixed inset-0 z-10 flex items-center justify-center overflow-auto bg-black/30 p-4">
+      <Card className="my-8 w-full max-w-2xl p-6">
+        <h2 className="mb-1 text-lg font-semibold text-slate-900">Reorder low-stock products</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Select which products to reorder. One draft PO will be created per supplier.
+        </p>
+
+        {loadingLowStock ? (
+          <p className="py-6 text-center text-sm text-slate-400">Loading low-stock products…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500">
+            No products are currently below their reorder point.
+          </p>
+        ) : (
+          <>
+            <div className="mb-4 max-h-72 overflow-y-auto rounded-lg border border-slate-200">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="px-3 py-2 font-medium">
+                      <input
+                        type="checkbox"
+                        checked={rows.every((r) => r.selected)}
+                        onChange={(e) =>
+                          setRows((prev) => prev.map((r) => ({ ...r, selected: e.target.checked })))
+                        }
+                      />
+                    </th>
+                    <th className="px-3 py-2 font-medium">Product</th>
+                    <th className="px-3 py-2 font-medium">Supplier</th>
+                    <th className="px-3 py-2 font-medium text-right">In stock</th>
+                    <th className="px-3 py-2 font-medium text-right">Reorder pt</th>
+                    <th className="px-3 py-2 font-medium text-right">Qty to order</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, idx) => (
+                    <tr
+                      key={row.product.id}
+                      className={`border-b border-slate-100 last:border-0 ${!row.selected ? 'opacity-40' : ''}`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={() => toggleRow(idx)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-slate-900">{row.product.name}</div>
+                        <div className="text-xs text-slate-400">{row.product.sku}</div>
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {row.product.supplier?.name ?? (
+                          <span className="text-amber-600">No supplier</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-red-600 font-medium">
+                        {row.product.totalStock ?? 0}
+                      </td>
+                      <td className="px-3 py-2 text-right text-slate-500">
+                        {row.product.reorderPoint}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          min="1"
+                          value={row.quantity}
+                          disabled={!row.selected}
+                          onChange={(e) => setQty(idx, e.target.value)}
+                          className="w-16 rounded border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-indigo-500 disabled:bg-slate-50"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {noSupplier.length > 0 && (
+              <p className="mb-3 text-xs text-amber-600">
+                {noSupplier.length} selected product{noSupplier.length > 1 ? 's have' : ' has'} no
+                supplier assigned and will be skipped.
+              </p>
+            )}
+
+            <div className="mb-4 grid grid-cols-2 gap-4">
+              <Field label="Destination warehouse">
+                <select
+                  value={warehouseId}
+                  onChange={(e) => setWarehouseId(e.target.value)}
+                  required
+                  className={selectCls}
+                >
+                  <option value="" disabled>— Select —</option>
+                  {warehouses?.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Expected delivery date">
+                <Input
+                  type="date"
+                  value={expectedAt}
+                  onChange={(e) => setExpectedAt(e.target.value)}
+                  required
+                />
+              </Field>
+            </div>
+
+            <div className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Will create{' '}
+              <span className="font-semibold text-slate-900">
+                {Object.keys(bySupplier).length} draft PO
+                {Object.keys(bySupplier).length !== 1 ? 's' : ''}
+              </span>{' '}
+              for{' '}
+              <span className="font-semibold text-slate-900">{selectedRows.length} product</span>
+              {selectedRows.length !== 1 ? 's' : ''}.
+            </div>
+          </>
+        )}
+
+        {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          {rows.length > 0 && (
+            <Button
+              onClick={() => {
+                if (!submitted) {
+                  setSubmitted(true);
+                  setError('');
+                  if (!warehouseId) {
+                    setError('Select a destination warehouse.');
+                    setSubmitted(false);
+                    return;
+                  }
+                  if (!expectedAt) {
+                    setError('Select an expected delivery date.');
+                    setSubmitted(false);
+                    return;
+                  }
+                  if (selectedRows.filter((r) => r.product.supplierId).length === 0) {
+                    setError('No products with a supplier selected.');
+                    setSubmitted(false);
+                    return;
+                  }
+                  mutation.mutate();
+                }
+              }}
+              disabled={mutation.isPending || selectedRows.length === 0}
+            >
+              {mutation.isPending
+                ? 'Creating…'
+                : `Create ${Object.keys(bySupplier).length} draft PO${Object.keys(bySupplier).length !== 1 ? 's' : ''}`}
+            </Button>
+          )}
+        </div>
       </Card>
     </div>
   );

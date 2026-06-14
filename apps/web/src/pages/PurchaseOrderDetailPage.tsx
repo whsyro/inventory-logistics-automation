@@ -7,6 +7,8 @@ import { money, poStatusLabel, poStatusTone, shortDate } from '../lib/format';
 import type { PoItem, PurchaseOrder } from '../types';
 import { Badge, Button, Card } from '../components/ui';
 
+const dateTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+
 export function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { hasRole } = useAuth();
@@ -62,6 +64,8 @@ export function PurchaseOrderDetailPage() {
 
   const canEdit = hasRole('ADMIN', 'MANAGER');
   const total = (po.items ?? []).reduce((s, i) => s + i.quantity * i.unitCost, 0);
+  const receivedTotal = (po.items ?? []).reduce((s, i) => s + i.receivedQty * i.unitCost, 0);
+  const remainingTotal = Math.max(total - receivedTotal, 0);
   const canReceive = po.status === 'ORDERED' || po.status === 'PARTIALLY_RECEIVED';
   const canCancel =
     po.status !== 'RECEIVED' && po.status !== 'CANCELLED' && po.status !== 'DECLINED';
@@ -81,6 +85,9 @@ export function PurchaseOrderDetailPage() {
           <p className="mt-1 text-sm text-slate-500">
             {po.supplier?.name} · {po.warehouse ? `to ${po.warehouse.name}` : 'no warehouse set'} ·
             expected {shortDate(po.expectedAt)}
+            {po.status === 'PARTIALLY_RECEIVED' && po.nextExpectedAt
+              ? ` · rest expected ${shortDate(po.nextExpectedAt)}`
+              : ''}
           </p>
         </div>
         {canEdit && (
@@ -139,6 +146,27 @@ export function PurchaseOrderDetailPage() {
           ⚠️ No destination warehouse set — you'll need one before receiving stock.
         </p>
       )}
+      {po.status === 'PARTIALLY_RECEIVED' && (
+        <p className="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-700">
+          Remaining stock expected {shortDate(po.nextExpectedAt)}. Need to pay:{' '}
+          <span className="font-semibold">{money(remainingTotal)}</span>.
+        </p>
+      )}
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <Card className="p-4">
+          <div className="text-xs font-medium uppercase text-slate-400">Order total</div>
+          <div className="mt-1 text-xl font-semibold text-slate-900">{money(total)}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs font-medium uppercase text-slate-400">Paid</div>
+          <div className="mt-1 text-xl font-semibold text-green-700">{money(receivedTotal)}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs font-medium uppercase text-slate-400">Remain to pay</div>
+          <div className="mt-1 text-xl font-semibold text-amber-700">{money(remainingTotal)}</div>
+        </Card>
+      </div>
 
       <Card>
         <table className="w-full text-sm">
@@ -147,6 +175,7 @@ export function PurchaseOrderDetailPage() {
               <th className="px-4 py-3 font-medium">Product</th>
               <th className="px-4 py-3 text-right font-medium">Ordered</th>
               <th className="px-4 py-3 text-right font-medium">Received</th>
+              <th className="px-4 py-3 text-right font-medium">Remaining</th>
               <th className="px-4 py-3 text-right font-medium">Unit cost</th>
               <th className="px-4 py-3 text-right font-medium">Line total</th>
             </tr>
@@ -164,6 +193,9 @@ export function PurchaseOrderDetailPage() {
                     {i.receivedQty}
                   </Badge>
                 </td>
+                <td className="px-4 py-3 text-right text-slate-600">
+                  {Math.max(i.quantity - i.receivedQty, 0)}
+                </td>
                 <td className="px-4 py-3 text-right text-slate-600">{money(i.unitCost)}</td>
                 <td className="px-4 py-3 text-right text-slate-600">
                   {money(i.quantity * i.unitCost)}
@@ -173,12 +205,56 @@ export function PurchaseOrderDetailPage() {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4} className="px-4 py-3 text-right font-medium text-slate-700">
+              <td colSpan={5} className="px-4 py-3 text-right font-medium text-slate-700">
                 Total
               </td>
               <td className="px-4 py-3 text-right font-semibold text-slate-900">{money(total)}</td>
             </tr>
           </tfoot>
+        </table>
+      </Card>
+
+      <Card className="mt-4">
+        <div className="border-b border-slate-100 px-4 py-3">
+          <div className="text-sm font-semibold text-slate-900">Receipt history</div>
+          <div className="text-xs text-slate-500">Arrivals received against this purchase order</div>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-slate-500">
+              <th className="px-4 py-3 font-medium">Arrived</th>
+              <th className="px-4 py-3 font-medium">Product</th>
+              <th className="px-4 py-3 font-medium">Warehouse</th>
+              <th className="px-4 py-3 text-right font-medium">Received</th>
+              <th className="px-4 py-3 font-medium">By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {po.receiptHistory && po.receiptHistory.length > 0 ? (
+              po.receiptHistory.map((r) => (
+                <tr key={r.id} className="border-b border-slate-100 last:border-0">
+                  <td className="px-4 py-3 text-slate-600">{dateTime(r.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-900">{r.product.name}</div>
+                    <div className="font-mono text-xs text-slate-400">{r.product.sku}</div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{r.warehouse.name}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Badge tone="green">
+                      {r.quantity} {r.product.unit}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{r.user?.name ?? '—'}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                  No stock has been received for this purchase order yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
         </table>
       </Card>
 
@@ -227,12 +303,27 @@ function ReceiveForm({
   const [received, setReceived] = useState<Record<string, string>>(
     Object.fromEntries(items.map((i) => [i.id, String(Math.max(i.quantity - i.receivedQty, 0))])),
   );
+  const [nextExpectedAt, setNextExpectedAt] = useState('');
   const [error, setError] = useState('');
+  const receiveNowTotal = items.reduce(
+    (sum, i) => sum + (Number(received[i.id]) || 0) * i.unitCost,
+    0,
+  );
+  const remainingAfterReceiveTotal = items.reduce((sum, i) => {
+    const receiveNow = Math.max(0, Number(received[i.id]) || 0);
+    const remainingAfter = Math.max(i.quantity - i.receivedQty - receiveNow, 0);
+    return sum + remainingAfter * i.unitCost;
+  }, 0);
+  const willBePartial = items.some((i) => {
+    const receiveNow = Math.max(0, Number(received[i.id]) || 0);
+    return i.receivedQty + receiveNow < i.quantity;
+  });
 
   const mutation = useMutation({
     mutationFn: async () =>
       api.post(`/purchase-orders/${poId}/receive`, {
         items: items.map((i) => ({ itemId: i.id, receivedQty: Number(received[i.id]) || 0 })),
+        nextExpectedAt: willBePartial ? nextExpectedAt : null,
       }),
     onSuccess: onSaved,
     onError: (err) => setError(apiError(err)),
@@ -246,6 +337,10 @@ function ReceiveForm({
           onSubmit={(e) => {
             e.preventDefault();
             setError('');
+            if (willBePartial && !nextExpectedAt) {
+              setError('Set the next expected date for the remaining stock.');
+              return;
+            }
             mutation.mutate();
           }}
           className="space-y-4"
@@ -281,6 +376,34 @@ function ReceiveForm({
               })}
             </tbody>
           </table>
+
+          {willBePartial && (
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-700">
+                Next expected date for remaining stock
+              </span>
+              <input
+                type="date"
+                value={nextExpectedAt}
+                onChange={(e) => setNextExpectedAt(e.target.value)}
+                required
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              />
+            </label>
+          )}
+
+          <div className="grid gap-3 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-medium uppercase text-slate-400">Received / payable now</div>
+              <div className="mt-1 font-semibold text-green-700">{money(receiveNowTotal)}</div>
+            </div>
+            <div>
+              <div className="text-xs font-medium uppercase text-slate-400">Still pending</div>
+              <div className="mt-1 font-semibold text-amber-700">
+                {money(remainingAfterReceiveTotal)}
+              </div>
+            </div>
+          </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 

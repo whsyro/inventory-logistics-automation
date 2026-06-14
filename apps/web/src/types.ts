@@ -118,6 +118,15 @@ export interface PoItem {
   product?: { id: string; sku: string; name: string; unit: string };
 }
 
+export interface PoReceiptHistory {
+  id: string;
+  quantity: number;
+  createdAt: string;
+  product: { id: string; sku: string; name: string; unit: string };
+  warehouse: { id: string; code: string; name: string };
+  user?: { name: string } | null;
+}
+
 export interface PurchaseOrder {
   id: string;
   number: string;
@@ -127,11 +136,13 @@ export interface PurchaseOrder {
   notes?: string | null;
   orderedAt?: string | null;
   expectedAt?: string | null;
+  nextExpectedAt?: string | null;
   createdAt: string;
   supplier?: { id: string; name: string } | null;
   warehouse?: { id: string; code: string; name: string } | null;
   createdBy?: { name: string } | null;
   items?: PoItem[];
+  receiptHistory?: PoReceiptHistory[];
   itemCount?: number;
   total?: number;
 }

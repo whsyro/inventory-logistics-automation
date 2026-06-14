@@ -7,7 +7,7 @@ import { Badge, Button, Card, Field, Input, PageHeader } from '../components/ui'
 export function InventoryPage() {
   const qc = useQueryClient();
   const [warehouseId, setWarehouseId] = useState('');
-  const [showAdjust, setShowAdjust] = useState(false);
+  const [showAdjust, setShowAdjust] = useState<'adjust' | 'move' | null>(null);
 
   const { data: warehouses } = useQuery({
     queryKey: ['warehouses'],
@@ -26,7 +26,12 @@ export function InventoryPage() {
       <PageHeader
         title="Inventory"
         subtitle="Stock levels by product and warehouse"
-        action={<Button onClick={() => setShowAdjust(true)}>± Adjust stock</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setShowAdjust('move')}>⇄ Move stock</Button>
+            <Button onClick={() => setShowAdjust('adjust')}>± Adjust stock</Button>
+          </div>
+        }
       />
 
       <div className="mb-4">
@@ -91,11 +96,12 @@ export function InventoryPage() {
       </Card>
 
       {showAdjust && (
-        <AdjustForm
+        <StockModal
+          mode={showAdjust}
           warehouses={warehouses ?? []}
-          onClose={() => setShowAdjust(false)}
+          onClose={() => setShowAdjust(null)}
           onSaved={() => {
-            setShowAdjust(false);
+            setShowAdjust(null);
             qc.invalidateQueries({ queryKey: ['inventory'] });
             qc.invalidateQueries({ queryKey: ['products'] });
             qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -106,27 +112,39 @@ export function InventoryPage() {
   );
 }
 
-function AdjustForm({
+function StockModal({
+  mode: initialMode,
   warehouses,
   onClose,
   onSaved,
 }: {
+  mode: 'adjust' | 'move';
   warehouses: Warehouse[];
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [mode, setMode] = useState<'adjust' | 'move'>(initialMode);
+
+  // shared
   const [productId, setProductId] = useState('');
-  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '');
-  const [delta, setDelta] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+
+  // adjust
+  const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id ?? '');
+  const [delta, setDelta] = useState('');
+
+  // move
+  const [fromWarehouseId, setFromWarehouseId] = useState(warehouses[0]?.id ?? '');
+  const [toWarehouseId, setToWarehouseId] = useState(warehouses[1]?.id ?? '');
+  const [quantity, setQuantity] = useState('');
 
   const { data: products } = useQuery({
     queryKey: ['products', '', false],
     queryFn: async () => (await api.get<Product[]>('/products')).data,
   });
 
-  const mutation = useMutation({
+  const adjustMutation = useMutation({
     mutationFn: async () =>
       api.post('/inventory/adjust', {
         productId,
@@ -138,24 +156,58 @@ function AdjustForm({
     onError: (err) => setError(apiError(err)),
   });
 
+  const moveMutation = useMutation({
+    mutationFn: async () =>
+      api.post('/inventory/transfer', {
+        productId,
+        fromWarehouseId,
+        toWarehouseId,
+        quantity: Number(quantity),
+        reason: reason || null,
+      }),
+    onSuccess: onSaved,
+    onError: (err) => setError(apiError(err)),
+  });
+
+  const selectCls =
+    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500';
+
+  const tabCls = (active: boolean) =>
+    `flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+      active
+        ? 'bg-indigo-600 text-white'
+        : 'text-slate-600 hover:bg-slate-100'
+    }`;
+
   return (
     <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
       <Card className="w-full max-w-md p-6">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Adjust stock</h2>
+        {/* Tab switcher */}
+        <div className="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1">
+          <button type="button" className={tabCls(mode === 'adjust')} onClick={() => { setMode('adjust'); setError(''); }}>
+            ± Adjust stock
+          </button>
+          <button type="button" className={tabCls(mode === 'move')} onClick={() => { setMode('move'); setError(''); }}>
+            ⇄ Move stock
+          </button>
+        </div>
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
             setError('');
-            mutation.mutate();
+            if (mode === 'adjust') adjustMutation.mutate();
+            else moveMutation.mutate();
           }}
           className="space-y-4"
         >
+          {/* Product — shared */}
           <Field label="Product">
             <select
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
               required
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              className={selectCls}
             >
               <option value="">— Select —</option>
               {products?.map((p) => (
@@ -165,29 +217,73 @@ function AdjustForm({
               ))}
             </select>
           </Field>
-          <Field label="Warehouse">
-            <select
-              value={warehouseId}
-              onChange={(e) => setWarehouseId(e.target.value)}
-              required
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500"
-            >
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Change (+ in / − out)">
-            <Input
-              type="number"
-              value={delta}
-              onChange={(e) => setDelta(e.target.value)}
-              placeholder="e.g. 50 or -10"
-              required
-            />
-          </Field>
+
+          {mode === 'adjust' ? (
+            <>
+              <Field label="Warehouse">
+                <select
+                  value={warehouseId}
+                  onChange={(e) => setWarehouseId(e.target.value)}
+                  required
+                  className={selectCls}
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Change (+ in / − out)">
+                <Input
+                  type="number"
+                  value={delta}
+                  onChange={(e) => setDelta(e.target.value)}
+                  placeholder="e.g. 50 or -10"
+                  required
+                />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="From warehouse">
+                <select
+                  value={fromWarehouseId}
+                  onChange={(e) => setFromWarehouseId(e.target.value)}
+                  required
+                  className={selectCls}
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="To warehouse">
+                <select
+                  value={toWarehouseId}
+                  onChange={(e) => setToWarehouseId(e.target.value)}
+                  required
+                  className={selectCls}
+                >
+                  {warehouses
+                    .filter((w) => w.id !== fromWarehouseId)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                </select>
+              </Field>
+              <Field label="Quantity to move">
+                <Input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="e.g. 20"
+                  required
+                />
+              </Field>
+            </>
+          )}
+
+          {/* Reason — shared */}
           <Field label="Reason">
             <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="optional" />
           </Field>
@@ -198,8 +294,12 @@ function AdjustForm({
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? 'Saving…' : 'Apply'}
+            <Button type="submit" disabled={adjustMutation.isPending || moveMutation.isPending}>
+              {adjustMutation.isPending || moveMutation.isPending
+                ? 'Saving…'
+                : mode === 'adjust'
+                  ? 'Apply'
+                  : 'Move'}
             </Button>
           </div>
         </form>

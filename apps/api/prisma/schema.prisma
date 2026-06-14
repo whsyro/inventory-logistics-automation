@@ -176,8 +176,9 @@ model PurchaseOrder {
   warehouseId String? // destination warehouse for received goods
   status      String    @default("DRAFT") // DRAFT | AWAITING_CONFIRMATION | ORDERED | PARTIALLY_RECEIVED | RECEIVED | CANCELLED | DECLINED
   notes       String?
-  orderedAt   DateTime?
-  expectedAt  DateTime?
+  orderedAt       DateTime?
+  expectedAt      DateTime?
+  nextExpectedAt  DateTime? // next delivery date when partially received
   createdById String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

@@ -233,6 +233,7 @@ const receiveSchema = z.object({
   items: z
     .array(z.object({ itemId: z.string().min(1), receivedQty: z.coerce.number().int().min(0) }))
     .min(1),
+  nextExpectedAt: z.coerce.date().optional().nullable(),
 });
 
 // GET /api/purchase-orders
@@ -272,7 +273,20 @@ purchaseOrdersRouter.get(
     });
     if (!po) throw notFound('Purchase order not found');
     const [withWh] = await withWarehouses([po]);
-    res.json(withWh);
+    const receiptHistory = await prisma.stockMovement.findMany({
+      where: {
+        type: 'RECEIPT',
+        reference: po.number,
+        product: { companyId: req.user!.companyId },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        product: { select: { id: true, sku: true, name: true, unit: true } },
+        warehouse: { select: { id: true, code: true, name: true } },
+        user: { select: { name: true } },
+      },
+    });
+    res.json({ ...withWh, receiptHistory });
   }),
 );
 
@@ -403,7 +417,7 @@ purchaseOrdersRouter.post(
   '/:id/receive',
   requireRole('ADMIN', 'MANAGER'),
   asyncHandler(async (req, res) => {
-    const { items: lines } = parse(receiveSchema, req.body);
+    const { items: lines, nextExpectedAt } = parse(receiveSchema, req.body);
 
     const updated = await prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findFirst({
@@ -451,10 +465,13 @@ purchaseOrdersRouter.post(
       const fullyReceived = after.every((i) => i.receivedQty >= i.quantity);
       const anyReceived = after.some((i) => i.receivedQty > 0);
       const status = fullyReceived ? 'RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : po.status;
+      if (status === 'PARTIALLY_RECEIVED' && !nextExpectedAt) {
+        throw badRequest('Set the next expected date for the remaining stock');
+      }
 
       return tx.purchaseOrder.update({
         where: { id: po.id },
-        data: { status },
+        data: { status, nextExpectedAt: status === 'PARTIALLY_RECEIVED' ? nextExpectedAt : null },
         include: {
           items: { include: { product: { select: { sku: true, name: true, unit: true } } } },
         },
