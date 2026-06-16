@@ -4,12 +4,13 @@ import express from 'express';
 import { corsOrigins, env } from './env.js';
 import { errorHandler } from './middleware/error.js';
 import { authRouter } from './routes/auth.js';
-import { carriersRouter } from './routes/carriers.js';
+import { customersRouter } from './routes/customers.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { inventoryRouter } from './routes/inventory.js';
+import { ordersRouter } from './routes/orders.js';
 import { productsRouter } from './routes/products.js';
 import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
-import { shipmentsRouter } from './routes/shipments.js';
+import { routesRouter } from './routes/routes.js';
 import { suppliersRouter } from './routes/suppliers.js';
 import { usersRouter } from './routes/users.js';
 import { warehousesRouter } from './routes/warehouses.js';
@@ -32,8 +33,9 @@ app.use('/api/warehouses', warehousesRouter);
 app.use('/api/inventory', inventoryRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.use('/api/purchase-orders', purchaseOrdersRouter);
-app.use('/api/shipments', shipmentsRouter);
-app.use('/api/carriers', carriersRouter);
+app.use('/api/routes', routesRouter);
+app.use('/api/customers', customersRouter);
+app.use('/api/orders', ordersRouter);
 app.use('/api/users', usersRouter);
 
 // 404 for unknown API routes

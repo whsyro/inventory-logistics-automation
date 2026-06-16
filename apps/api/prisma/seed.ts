@@ -21,6 +21,7 @@ async function main() {
     { email: 'admin@ila.local', name: 'Ada Admin', role: 'ADMIN' },
     { email: 'manager@ila.local', name: 'Max Manager', role: 'MANAGER' },
     { email: 'staff@ila.local', name: 'Sam Staff', role: 'STAFF' },
+    { email: 'driver@ila.local', name: 'Dan Driver', role: 'DRIVER' },
   ];
   for (const u of users) {
     await prisma.user.upsert({
@@ -107,8 +108,68 @@ async function main() {
     }
   }
 
+  // --- Routes (each handled by a driver) + customers assigned to them ---
+  const driver = await prisma.user.findUnique({
+    where: { email: 'driver@ila.local' },
+    select: { id: true },
+  });
+
+  const northRoute = await prisma.route.upsert({
+    where: { companyId_name: { companyId, name: 'North Route' } },
+    update: { driverId: driver?.id ?? null },
+    create: { name: 'North Route', code: 'N', companyId, driverId: driver?.id ?? null },
+  });
+  const southRoute = await prisma.route.upsert({
+    where: { companyId_name: { companyId, name: 'South Route' } },
+    update: {},
+    create: { name: 'South Route', code: 'S', companyId },
+  });
+
+  const customerSeed = [
+    { id: 'seed-cust-1', name: 'Corner Store', address: '12 Main St', routeId: northRoute.id },
+    { id: 'seed-cust-2', name: 'Downtown Deli', address: '88 Center Ave', routeId: northRoute.id },
+    { id: 'seed-cust-3', name: 'Harbor Market', address: '3 Dockside', routeId: southRoute.id },
+  ];
+  for (const c of customerSeed) {
+    await prisma.customer.upsert({
+      where: { id: c.id },
+      update: { routeId: c.routeId },
+      create: { ...c, companyId },
+    });
+  }
+
+  // --- A sample confirmed order (so centralization has something to show) ---
+  const widget = await prisma.product.findUnique({
+    where: { companyId_sku: { companyId, sku: 'WIDGET-001' } },
+    select: { id: true, unitPrice: true },
+  });
+  const gadget = await prisma.product.findUnique({
+    where: { companyId_sku: { companyId, sku: 'GADGET-100' } },
+    select: { id: true, unitPrice: true },
+  });
+  const existingOrder = await prisma.order.findFirst({ where: { companyId, number: 'ORD-0001' } });
+  if (!existingOrder && widget && gadget) {
+    await prisma.order.create({
+      data: {
+        number: 'ORD-0001',
+        companyId,
+        customerId: 'seed-cust-1',
+        routeId: northRoute.id,
+        warehouseId: main.id,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+        items: {
+          create: [
+            { productId: widget.id, quantity: 24, unitPrice: widget.unitPrice, discount: 0 },
+            { productId: gadget.id, quantity: 6, unitPrice: gadget.unitPrice, discount: 10 },
+          ],
+        },
+      },
+    });
+  }
+
   console.log('✅ Seed complete.');
-  console.log('   Logins: admin@ila.local / manager@ila.local / staff@ila.local');
+  console.log('   Logins: admin@ila.local / manager@ila.local / staff@ila.local / driver@ila.local');
   console.log('   Password for all: password123');
 }
 

@@ -1,4 +1,4 @@
-export type Role = 'ADMIN' | 'MANAGER' | 'STAFF';
+export type Role = 'ADMIN' | 'MANAGER' | 'STAFF' | 'DRIVER';
 
 export type ProductVisibility = 'COMPANY' | 'RESTRICTED' | 'BY_ROLE' | 'ADMINS_ONLY';
 
@@ -157,54 +157,83 @@ export interface PurchaseOrder {
   total?: number;
 }
 
-export type ShipmentStatus =
-  | 'PENDING'
-  | 'PICKING'
-  | 'SHIPPED'
-  | 'DELIVERED'
-  | 'CANCELLED';
+export type OrderStatus = 'UNCONFIRMED' | 'CONFIRMED' | 'PREORDER' | 'DELIVERED' | 'CANCELLED';
 
-export interface ShipmentItem {
+export interface Route {
   id: string;
-  productId: string;
-  quantity: number;
-  product?: { id: string; sku: string; name: string; unit: string };
+  name: string;
+  code?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  driverId?: string | null;
+  driver?: { id: string; name: string; email?: string } | null;
+  customers?: { id: string; name: string; address?: string | null; isActive: boolean }[];
+  orders?: {
+    id: string;
+    number: string;
+    status: OrderStatus;
+    createdAt: string;
+    customer?: { id: string; name: string };
+  }[];
+  _count?: { customers: number; orders: number };
 }
 
-export interface Carrier {
+export interface Customer {
   id: string;
   name: string;
   contactName?: string | null;
   email?: string | null;
   phone?: string | null;
-  accountNumber?: string | null;
-  serviceLevels?: string | null;
+  address?: string | null;
   notes?: string | null;
   isActive: boolean;
-  shipmentCount?: number;
-  freightSpend?: number;
+  routeId?: string | null;
+  route?: { id: string; name: string } | null;
+  _count?: { orders: number };
+  orders?: { id: string; number: string; status: OrderStatus; createdAt: string }[];
 }
 
-export interface Shipment {
+export interface OrderItem {
+  id: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number; // percent off this line (0–100)
+  product?: { id: string; sku: string; name: string; unit: string };
+}
+
+export interface Order {
   id: string;
   number: string;
-  status: ShipmentStatus;
-  warehouseId: string;
-  customerName: string;
-  address?: string | null;
-  carrierId?: string | null;
-  carrier?: { id: string; name: string } | null;
-  trackingNumber?: string | null;
-  freightCost: number;
+  status: OrderStatus;
   notes?: string | null;
-  shippedAt?: string | null;
+  warehouseId?: string | null;
+  confirmedAt?: string | null;
   deliveredAt?: string | null;
   createdAt: string;
+  customerId: string;
+  customer?: { id: string; name: string; address?: string | null } | null;
+  routeId?: string | null;
+  route?: { id: string; name: string; driver?: { id: string; name: string } | null } | null;
   warehouse?: { id: string; code: string; name: string } | null;
   createdBy?: { name: string } | null;
-  items?: ShipmentItem[];
+  items?: OrderItem[];
   itemCount?: number;
-  totalUnits?: number;
+  total?: number;
+}
+
+export interface CentralizationGroup {
+  route: { id: string; name: string; code?: string | null } | null;
+  driver: { id: string; name: string } | null;
+  orderCount: number;
+  totalUnits: number;
+  stops: { customerId: string; customerName: string; address?: string | null; orderCount: number }[];
+  merchandise: { productId: string; sku: string; name: string; unit: string; quantity: number }[];
+}
+
+export interface Centralization {
+  statuses: string[];
+  groups: CentralizationGroup[];
 }
 
 export interface DashboardData {

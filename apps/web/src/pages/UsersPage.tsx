@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import type { ManagedUser, Role } from '../types';
 import { Badge, Button, Card, Field, Input, PageHeader } from '../components/ui';
 
-const ROLES: Role[] = ['ADMIN', 'MANAGER', 'STAFF'];
+const ROLES: Role[] = ['ADMIN', 'MANAGER', 'STAFF', 'DRIVER'];
 
 export function UsersPage() {
   const { user: me } = useAuth();

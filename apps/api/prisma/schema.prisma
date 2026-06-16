@@ -34,8 +34,9 @@ model Company {
   products       Product[]
   suppliers      Supplier[]
   purchaseOrders PurchaseOrder[]
-  shipments      Shipment[]
-  carriers       Carrier[]
+  routes         Route[]
+  customers      Customer[]
+  orders         Order[]
 }
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
-  role         String   @default("STAFF") // ADMIN | MANAGER | STAFF
+  role         String   @default("STAFF") // ADMIN | MANAGER | STAFF | DRIVER
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -56,7 +57,8 @@ model User {
 
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
-  shipments      Shipment[]
+  orders         Order[]
+  routesDriven   Route[]         @relation("RouteDriver")
 
   productVisibility ProductVisibility[]
 }
@@ -78,7 +80,7 @@ model Warehouse {
 
   stockLevels    StockLevel[]
   stockMovements StockMovement[]
-  shipments      Shipment[]
+  orders         Order[]
 
   @@unique([companyId, code])
 }
@@ -112,7 +114,7 @@ model Product {
   stockLevels        StockLevel[]
   stockMovements     StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
-  shipmentItems      ShipmentItem[]
+  orderItems         OrderItem[]
   visibleTo          ProductVisibility[]
   hiddenRoles        ProductHiddenRole[]
 
@@ -165,10 +167,10 @@ model StockMovement {
   id          String   @id @default(cuid())
   productId   String
   warehouseId String
-  type        String // ADJUSTMENT | RECEIPT | SHIPMENT | TRANSFER_IN | TRANSFER_OUT
+  type        String // ADJUSTMENT | RECEIPT | DELIVERY | TRANSFER_IN | TRANSFER_OUT
   quantity    Int // signed delta: positive = in, negative = out
   reason      String?
-  reference   String? // e.g. PO or shipment number
+  reference   String? // e.g. PO or order number
   userId      String?
   createdAt   DateTime @default(now())
 
@@ -239,62 +241,92 @@ model PurchaseOrderItem {
 }
 
 // ---------------------------------------------------------------------------
-// Freight (carriers) & shipments (outbound)
+// Distribution: routes, customers & orders (outbound)
+//
+// A Route belongs to one Driver (a User with role DRIVER) and groups Customers.
+// A Customer is assigned to a Route; the orders they place inherit that route
+// (snapshotted onto the Order as routeId so it stays stable if reassigned).
 // ---------------------------------------------------------------------------
-model Carrier {
-  id            String   @id @default(cuid())
-  name          String
-  contactName   String?
-  email         String?
-  phone         String?
-  accountNumber String?
-  serviceLevels String? // e.g. "Ground, Express, Overnight"
-  notes         String?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+model Route {
+  id        String   @id @default(cuid())
+  name      String
+  code      String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
-  shipments Shipment[]
+  driverId String? // a User with role DRIVER
+  driver   User?   @relation("RouteDriver", fields: [driverId], references: [id])
+
+  customers Customer[]
+  orders    Order[]
+
+  @@unique([companyId, name])
 }
 
-model Shipment {
-  id             String    @id @default(cuid())
-  number         String
-  warehouseId    String // source warehouse
-  status         String    @default("PENDING") // PENDING | PICKING | SHIPPED | DELIVERED | CANCELLED
-  customerName   String
-  address        String?
-  trackingNumber String?
-  freightCost    Float     @default(0) // what the freight (shipping) costs
-  notes          String?
-  shippedAt      DateTime?
-  deliveredAt    DateTime?
-  createdById    String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
-  carrierId String?
-  carrier   Carrier? @relation(fields: [carrierId], references: [id])
+  routeId String? // the route this customer belongs to
+  route   Route?  @relation(fields: [routeId], references: [id])
 
-  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
-  createdBy User?          @relation(fields: [createdById], references: [id])
-  items     ShipmentItem[]
+  orders Order[]
+}
+
+model Order {
+  id          String    @id @default(cuid())
+  number      String
+  status      String    @default("UNCONFIRMED") // UNCONFIRMED | CONFIRMED | PREORDER | DELIVERED | CANCELLED
+  notes       String?
+  warehouseId String? // source warehouse goods are delivered from
+  confirmedAt DateTime?
+  deliveredAt DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Snapshot of the customer's route at order time (stays put if the customer
+  // is later moved to another route).
+  routeId String?
+  route   Route?  @relation(fields: [routeId], references: [id])
+
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id])
+  createdBy User?      @relation(fields: [createdById], references: [id])
+  items     OrderItem[]
 
   @@unique([companyId, number])
 }
 
-model ShipmentItem {
-  id         String @id @default(cuid())
-  shipmentId String
-  productId  String
-  quantity   Int
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float  @default(0) // captured from the product when added
+  discount  Float  @default(0) // percent off this line (0–100)
 
-  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-  product  Product  @relation(fields: [productId], references: [id])
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
 }

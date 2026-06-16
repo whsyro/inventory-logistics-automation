@@ -1,7 +1,7 @@
 // Allowed values for the String-typed "enum" fields in the Prisma schema.
 // Kept here (not in the DB) so the schema stays portable across SQLite/Postgres.
 
-export const ROLES = ['ADMIN', 'MANAGER', 'STAFF'] as const;
+export const ROLES = ['ADMIN', 'MANAGER', 'STAFF', 'DRIVER'] as const;
 export type Role = (typeof ROLES)[number];
 
 // Roles a product can be hidden from. Admins always retain access, so they're
@@ -12,7 +12,7 @@ export type HideableRole = (typeof HIDEABLE_ROLES)[number];
 export const MOVEMENT_TYPES = [
   'ADJUSTMENT',
   'RECEIPT',
-  'SHIPMENT',
+  'DELIVERY',
   'TRANSFER_IN',
   'TRANSFER_OUT',
 ] as const;
@@ -35,11 +35,14 @@ export type PoStatus = (typeof PO_STATUSES)[number];
 export const PRODUCT_VISIBILITIES = ['COMPANY', 'RESTRICTED', 'BY_ROLE', 'ADMINS_ONLY'] as const;
 export type ProductVisibility = (typeof PRODUCT_VISIBILITIES)[number];
 
-export const SHIPMENT_STATUSES = [
-  'PENDING',
-  'PICKING',
-  'SHIPPED',
+// Order lifecycle: placed (UNCONFIRMED) → CONFIRMED (stored for viewing) →
+// PREORDER (adjust discounts / add-remove products) → DELIVERED (stock deducted)
+// or CANCELLED. Editing line items is allowed while UNCONFIRMED or PREORDER.
+export const ORDER_STATUSES = [
+  'UNCONFIRMED',
+  'CONFIRMED',
+  'PREORDER',
   'DELIVERED',
   'CANCELLED',
 ] as const;
-export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
+export type OrderStatus = (typeof ORDER_STATUSES)[number];

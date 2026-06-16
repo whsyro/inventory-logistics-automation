@@ -10,9 +10,12 @@ import { WarehousesPage } from './pages/WarehousesPage';
 import { SuppliersPage } from './pages/SuppliersPage';
 import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
 import { PurchaseOrderDetailPage } from './pages/PurchaseOrderDetailPage';
-import { ShipmentsPage } from './pages/ShipmentsPage';
-import { ShipmentDetailPage } from './pages/ShipmentDetailPage';
-import { CarriersPage } from './pages/CarriersPage';
+import { RoutesPage } from './pages/RoutesPage';
+import { RouteDetailPage } from './pages/RouteDetailPage';
+import { CustomersPage } from './pages/CustomersPage';
+import { OrdersPage } from './pages/OrdersPage';
+import { OrderDetailPage } from './pages/OrderDetailPage';
+import { CentralizationPage } from './pages/CentralizationPage';
 import { UsersPage } from './pages/UsersPage';
 import type { Role } from './types';
 
@@ -54,9 +57,12 @@ export function App() {
         <Route path="suppliers" element={<SuppliersPage />} />
         <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
-        <Route path="shipments" element={<ShipmentsPage />} />
-        <Route path="shipments/:id" element={<ShipmentDetailPage />} />
-        <Route path="carriers" element={<CarriersPage />} />
+        <Route path="routes" element={<RoutesPage />} />
+        <Route path="routes/:id" element={<RouteDetailPage />} />
+        <Route path="customers" element={<CustomersPage />} />
+        <Route path="orders" element={<OrdersPage />} />
+        <Route path="orders/:id" element={<OrderDetailPage />} />
+        <Route path="centralization" element={<CentralizationPage />} />
         <Route
           path="users"
           element={

@@ -20,7 +20,7 @@ const publicUser = {
   createdAt: true,
 } as const;
 
-const roleEnum = z.enum(['ADMIN', 'MANAGER', 'STAFF']);
+const roleEnum = z.enum(['ADMIN', 'MANAGER', 'STAFF', 'DRIVER']);
 
 const createSchema = z.object({
   email: z.string().email(),

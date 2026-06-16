@@ -1,4 +1,4 @@
-import type { PoStatus, ShipmentStatus } from '../types';
+import type { OrderStatus, PoStatus } from '../types';
 
 export const money = (n: number) =>
   n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
@@ -26,18 +26,18 @@ export const poStatusLabel: Record<PoStatus, string> = {
   DECLINED: 'Declined',
 };
 
-export const shipmentStatusTone: Record<ShipmentStatus, 'gray' | 'blue' | 'amber' | 'green' | 'red'> = {
-  PENDING: 'gray',
-  PICKING: 'amber',
-  SHIPPED: 'blue',
+export const orderStatusTone: Record<OrderStatus, 'gray' | 'blue' | 'amber' | 'green' | 'red'> = {
+  UNCONFIRMED: 'gray',
+  CONFIRMED: 'blue',
+  PREORDER: 'amber',
   DELIVERED: 'green',
   CANCELLED: 'red',
 };
 
-export const shipmentStatusLabel: Record<ShipmentStatus, string> = {
-  PENDING: 'Pending',
-  PICKING: 'Picking',
-  SHIPPED: 'Shipped',
+export const orderStatusLabel: Record<OrderStatus, string> = {
+  UNCONFIRMED: 'Unconfirmed',
+  CONFIRMED: 'Confirmed',
+  PREORDER: 'Pre-order',
   DELIVERED: 'Delivered',
   CANCELLED: 'Cancelled',
 };
